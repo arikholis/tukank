@@ -1,0 +1,5 @@
+{
+  "name": "VALIDATOR TUQANG",
+  "description": "Sebuah aplikasi web untuk memvalidasi ukuran-ukuran bangun ruang (persegi, persegi panjang, segitiga siku-siku, trapesium siku-siku) menggunakan Gemini API.",
+  "requestFramePermissions": []
+}
