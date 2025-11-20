@@ -1,106 +1,122 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { Shape, Inputs, ValidationResult } from '../types';
-import { SHAPE_CONFIGS } from '../constants';
 
-// Schema response yang diharapkan
-const responseSchema = {
-  type: Type.OBJECT,
-  properties: {
-    isValid: {
-      type: Type.BOOLEAN,
-      description: 'Apakah ukurannya membentuk bangun yang valid.'
-    },
-    explanation: {
-      type: Type.STRING,
-      description: 'Penjelasan singkat tentang hasil validasi dalam Bahasa Indonesia.'
-    },
-    keliling: {
-      type: Type.NUMBER,
-      description: 'Keliling dari bangun ruang tersebut jika ukurannya valid. Jika tidak valid, nilainya harus 0.'
-    }
-  },
-  required: ['isValid', 'explanation', 'keliling']
-};
-
-// Prompt Template yang digunakan baik di client (dev) maupun server (prod)
-export const generatePrompt = (shapeLabel: string, numericInputs: Record<string, number>) => `
-Anda adalah seorang ahli geometri. Seorang pengguna telah memberikan ukuran untuk bangun ruang tertentu.
-Tugas Anda adalah memvalidasi apakah ukuran-ukuran ini dapat membentuk bangun ruang yang ditentukan DAN menghitung kelilingnya jika valid.
-
-Bangun Ruang: ${shapeLabel}
-Ukuran: ${JSON.stringify(numericInputs)}
-
-Jawab dalam format JSON sesuai dengan skema yang diberikan.
-- Jika ukurannya valid, 'explanation' HARUS berisi teks "Mantap, Anda dapat proyek!".
-- Jika ukurannya tidak valid, 'explanation' harus berisi penjelasan singkat mengapa ukuran tersebut tidak valid dalam Bahasa Indonesia.
-
-Berikut adalah aturan validasi:
-- Untuk Persegi, verifikasi bahwa semua empat sisi (sisi1, sisi2, sisi3, sisi4) memiliki panjang yang sama dan positif. Jika valid, kelilingnya adalah 4 * sisi1.
-- Untuk Persegi Panjang, verifikasi bahwa sisi yang berhadapan memiliki panjang yang sama (sisi1 sama dengan sisi3, dan sisi2 sama dengan sisi4) dan semua sisi positif. Jika valid, kelilingnya adalah 2 * (sisi1 + sisi2).
-- Untuk Segitiga Siku-Siku, verifikasi teorema Pythagoras (a² + b² = c², dimana c adalah sisi terpanjang/miring). Jika valid, kelilingnya adalah a + b + c.
-- Untuk Trapesium Siku-Siku, verifikasi hubungan pythagoras antara tinggi, selisih sisi sejajar, dan sisi miring (tinggi² + (bawah - atas)² = miring²). Pastikan juga sisi bawah lebih panjang dari sisi atas dan semua ukuran positif. Jika valid, kelilingnya adalah atas + bawah + tinggi + miring.
-Pastikan sisi miring (hypotenuse) selalu sisi terpanjang untuk segitiga siku-siku.
-
-Jika ukurannya TIDAK VALID, nilai 'keliling' harus 0.
-`;
+// Helper untuk memeriksa kesamaan dengan toleransi kecil (untuk float point arithmetic)
+const isAlmostEqual = (a: number, b: number, epsilon = 0.01) => Math.abs(a - b) < epsilon;
 
 export const validateShape = async (shape: Shape, inputs: Inputs): Promise<ValidationResult> => {
-  const shapeLabel = SHAPE_CONFIGS[shape].label;
-  const numericInputs = Object.fromEntries(
-    Object.entries(inputs).map(([key, value]) => [key, Number(value)])
-  );
+  // Simulasi delay seolah-olah sedang "berpikir" agar UX lebih natural (opsional)
+  await new Promise(resolve => setTimeout(resolve, 600));
 
-  // MODE PRODUCTION: Gunakan Netlify Function (Backend) untuk menyembunyikan API Key
-  if (!process.env.API_KEY) {
-    try {
-      const response = await fetch('/.netlify/functions/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          shape, 
-          inputs: numericInputs,
-          shapeLabel // Kirim label agar backend tahu konteksnya
-        }),
-      });
+  const numInputs: Record<string, number> = {};
+  
+  // Konversi input ke number
+  for (const key in inputs) {
+    const val = parseFloat(inputs[key]);
+    if (isNaN(val) || val <= 0) {
+      return {
+        isValid: false,
+        explanation: "Semua input harus berupa angka positif."
+      };
+    }
+    numInputs[key] = val;
+  }
 
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`Server Error: ${errorData}`);
+  let isValid = false;
+  let explanation = "";
+  let keliling = 0;
+
+  switch (shape) {
+    case Shape.Square: {
+      const { sisi1, sisi2, sisi3, sisi4 } = numInputs;
+      // Validasi: Semua sisi harus sama
+      isValid = isAlmostEqual(sisi1, sisi2) && isAlmostEqual(sisi2, sisi3) && isAlmostEqual(sisi3, sisi4);
+      
+      if (isValid) {
+        keliling = sisi1 * 4;
+        explanation = "Mantap, Anda dapat proyek! Semua sisi persegi sama panjang.";
+      } else {
+        explanation = "Ukuran tidak valid. Untuk membuat persegi yang benar, keempat sisinya harus memiliki panjang yang sama persis.";
+      }
+      break;
+    }
+
+    case Shape.Rectangle: {
+      const { sisi1, sisi2, sisi3, sisi4 } = numInputs;
+      // Validasi: Sisi berhadapan harus sama (1=3, 2=4)
+      isValid = isAlmostEqual(sisi1, sisi3) && isAlmostEqual(sisi2, sisi4);
+      
+      if (isValid) {
+        keliling = 2 * (sisi1 + sisi2);
+        explanation = "Mantap, Anda dapat proyek! Sisi-sisi yang berhadapan sama panjang, membentuk persegi panjang yang sempurna.";
+      } else {
+        explanation = "Ukuran tidak valid. Pada persegi panjang, sisi atas harus sama dengan sisi bawah, dan sisi kiri harus sama dengan sisi kanan.";
+      }
+      break;
+    }
+
+    case Shape.RightTriangle: {
+      const { a, b, c } = numInputs; // a=alas, b=tinggi, c=miring
+      
+      // Validasi: Pythagoras a² + b² = c²
+      // Kita urutkan dulu untuk memastikan mana sisi terpanjang jika user salah input field
+      const sides = [a, b, c].sort((x, y) => x - y);
+      const [short1, short2, long] = sides;
+
+      // Cek apakah input sesuai field yang dimaksud (c harus miring/terpanjang)
+      if (c !== long) {
+        return {
+          isValid: false,
+          explanation: "Ukuran tidak valid. Sisi miring (C) haruslah sisi yang paling panjang di antara ketiganya."
+        };
       }
 
-      return await response.json();
-    } catch (error) {
-      console.error("Error calling Netlify Function:", error);
-      throw new Error("Gagal memvalidasi lewat server. Pastikan Anda terhubung ke internet.");
+      isValid = isAlmostEqual(short1 ** 2 + short2 ** 2, long ** 2);
+
+      if (isValid) {
+        keliling = a + b + c;
+        explanation = "Mantap, Anda dapat proyek! Ukuran ini memenuhi teorema Pythagoras, membentuk sudut siku-siku yang presisi.";
+      } else {
+        explanation = `Ukuran tidak valid. ${a}² + ${b}² (${(a**2 + b**2).toFixed(2)}) tidak sama dengan ${c}² (${(c**2).toFixed(2)}). Sudut siku-siku tidak akan terbentuk.`;
+      }
+      break;
     }
-  }
 
-  // MODE DEVELOPMENT: Gunakan Client-side SDK (membutuhkan API Key di .env lokal)
-  // Ini memudahkan testing di VS Code tanpa harus menjalankan 'netlify dev'
-  try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const prompt = generatePrompt(shapeLabel, numericInputs);
+    case Shape.RightTrapezoid: {
+      const { atas, bawah, tinggi, miring } = numInputs;
+      
+      // Validasi Trapesium Siku-Siku
+      // Logika: Kita tarik garis lurus dari sisi atas ke bawah, membentuk segitiga siku-siku kecil.
+      // Alas segitiga kecil itu adalah selisih (bawah - atas).
+      // Maka: tinggi² + (bawah - atas)² = miring²
+      
+      if (bawah <= atas) {
+         return {
+          isValid: false,
+          explanation: "Ukuran tidak valid. Untuk trapesium siku-siku pada umumnya, sisi bawah harus lebih panjang dari sisi atas."
+        };
+      }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema,
-      },
-    });
+      const alasSegitigaKecil = bawah - atas;
+      const pythagorasCheck = (tinggi ** 2) + (alasSegitigaKecil ** 2);
+      
+      isValid = isAlmostEqual(pythagorasCheck, miring ** 2);
 
-    const text = response.text;
-    if (!text) {
-      throw new Error("API mengembalikan respons kosong.");
+      if (isValid) {
+        keliling = atas + bawah + tinggi + miring;
+        explanation = "Mantap, Anda dapat proyek! Hubungan antara tinggi, selisih sisi sejajar, dan sisi miring sudah matematis dan benar.";
+      } else {
+        explanation = `Ukuran tidak valid. Sisi miring tidak sesuai dengan perhitungan geometri. Seharusnya sisi miring adalah akar dari (${tinggi}² + (${bawah}-${atas})²), yaitu sekitar ${Math.sqrt(pythagorasCheck).toFixed(2)}.`;
+      }
+      break;
     }
     
-    const cleanedText = text.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-    const parsedResult = JSON.parse(cleanedText) as ValidationResult;
-    return parsedResult;
-
-  } catch (error) {
-    console.error("Error calling Gemini API (Local):", error);
-    throw new Error("Gagal berkomunikasi dengan layanan AI (Local). Periksa API Key Anda.");
+    default:
+      return { isValid: false, explanation: "Bangun ruang tidak dikenali." };
   }
+
+  return {
+    isValid,
+    explanation,
+    keliling: isValid ? Number(keliling.toFixed(2)) : 0
+  };
 };

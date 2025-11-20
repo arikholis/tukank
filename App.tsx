@@ -57,10 +57,10 @@ const App: React.FC = () => {
       <div className="w-full max-w-2xl mx-auto">
         <header className="text-center mb-10">
           <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
-            Validator Tuqang x AI
+            Validator Tuqang
           </h1>
           <p className="text-slate-400 mt-2 text-lg">
-            Validasi ukuran proyek Anda dengan kekuatan AI
+            Validasi ukuran proyek Anda dengan presisi matematika
           </p>
         </header>
 
@@ -78,7 +78,7 @@ const App: React.FC = () => {
                 disabled={!isFormValid || isLoading}
                 className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-slate-900 font-bold py-3 px-4 rounded-lg transition-all duration-300 text-lg shadow-lg shadow-cyan-500/20 hover:shadow-cyan-400/30 disabled:shadow-none"
               >
-                {isLoading ? 'Memvalidasi...' : 'Validasi Ukuran'}
+                {isLoading ? 'Menghitung...' : 'Validasi Ukuran'}
               </button>
             </div>
           </form>
@@ -87,7 +87,7 @@ const App: React.FC = () => {
         </main>
         
         <footer className="text-center mt-8 text-slate-500 text-sm">
-          <p>Ditenagai oleh Google Gemini API</p>
+          <p>&copy; 2025 Validator Tuqang</p>
         </footer>
       </div>
     </div>
