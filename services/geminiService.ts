@@ -2,10 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Shape, Inputs, ValidationResult } from '../types';
 import { SHAPE_CONFIGS } from '../constants';
 
-// The API key must be obtained exclusively from the environment variable process.env.API_KEY.
-// Assume this variable is pre-configured, valid, and accessible.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
+// Schema response yang diharapkan
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
@@ -25,13 +22,8 @@ const responseSchema = {
   required: ['isValid', 'explanation', 'keliling']
 };
 
-export const validateShape = async (shape: Shape, inputs: Inputs): Promise<ValidationResult> => {
-  const shapeLabel = SHAPE_CONFIGS[shape].label;
-  const numericInputs = Object.fromEntries(
-    Object.entries(inputs).map(([key, value]) => [key, Number(value)])
-  );
-
-  const prompt = `
+// Prompt Template yang digunakan baik di client (dev) maupun server (prod)
+export const generatePrompt = (shapeLabel: string, numericInputs: Record<string, number>) => `
 Anda adalah seorang ahli geometri. Seorang pengguna telah memberikan ukuran untuk bangun ruang tertentu.
 Tugas Anda adalah memvalidasi apakah ukuran-ukuran ini dapat membentuk bangun ruang yang ditentukan DAN menghitung kelilingnya jika valid.
 
@@ -52,7 +44,43 @@ Pastikan sisi miring (hypotenuse) selalu sisi terpanjang untuk segitiga siku-sik
 Jika ukurannya TIDAK VALID, nilai 'keliling' harus 0.
 `;
 
+export const validateShape = async (shape: Shape, inputs: Inputs): Promise<ValidationResult> => {
+  const shapeLabel = SHAPE_CONFIGS[shape].label;
+  const numericInputs = Object.fromEntries(
+    Object.entries(inputs).map(([key, value]) => [key, Number(value)])
+  );
+
+  // MODE PRODUCTION: Gunakan Netlify Function (Backend) untuk menyembunyikan API Key
+  if (!process.env.API_KEY) {
+    try {
+      const response = await fetch('/.netlify/functions/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          shape, 
+          inputs: numericInputs,
+          shapeLabel // Kirim label agar backend tahu konteksnya
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Server Error: ${errorData}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Error calling Netlify Function:", error);
+      throw new Error("Gagal memvalidasi lewat server. Pastikan Anda terhubung ke internet.");
+    }
+  }
+
+  // MODE DEVELOPMENT: Gunakan Client-side SDK (membutuhkan API Key di .env lokal)
+  // Ini memudahkan testing di VS Code tanpa harus menjalankan 'netlify dev'
   try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const prompt = generatePrompt(shapeLabel, numericInputs);
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
@@ -62,19 +90,17 @@ Jika ukurannya TIDAK VALID, nilai 'keliling' harus 0.
       },
     });
 
-    // Use getter directly. Ensure it is not undefined before manipulating.
     const text = response.text;
     if (!text) {
       throw new Error("API mengembalikan respons kosong.");
     }
     
-    // Sometimes the API might wrap the JSON in markdown backticks
     const cleanedText = text.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-
     const parsedResult = JSON.parse(cleanedText) as ValidationResult;
     return parsedResult;
+
   } catch (error) {
-    console.error("Error calling Gemini API:", error);
-    throw new Error("Gagal berkomunikasi dengan layanan AI. Silakan coba lagi.");
+    console.error("Error calling Gemini API (Local):", error);
+    throw new Error("Gagal berkomunikasi dengan layanan AI (Local). Periksa API Key Anda.");
   }
 };

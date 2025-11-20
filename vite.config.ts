@@ -7,7 +7,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      // Hanya inject API_KEY jika dalam mode development.
+      // Di production, key akan ditangani oleh Netlify Functions.
+      'process.env.API_KEY': mode === 'development' ? JSON.stringify(env.API_KEY) : undefined,
     },
   };
 });
